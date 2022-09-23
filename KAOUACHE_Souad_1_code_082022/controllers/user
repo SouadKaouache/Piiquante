@@ -1,0 +1,129 @@
+/************************************** LOGIQUE METIER UTILISATEUR **************************************/
+
+// Importation du modèle utilisateur crée à l'aide de mongoose. //
+const User = require("../models/User");
+// Importation du package jsonwebtoken destiné à attribuer un token d'identification lors de la connexion. //
+const jwt = require("jsonwebtoken");
+// Importation du package bcrypt destiné à hasher le mot de passe afin de se prémunir des attaques par force brute ou autre. //
+const bcrypt = require("bcrypt");
+// Importation du package dotenv afin de sécuriser certaines données sensibles liées au mdp ou à la base de données. //
+require("dotenv").config();
+// Un token fort a été généré aléatoirement et stocker dans la variable d'environnement RANDOM_TOKEN_SECRET. //
+const RANDOM_TOKEN_SECRET = process.env.RANDOM_TOKEN_SECRET;
+// Importation du package emailValidator afin de vérifier le format d'une adresse mail. //
+const emailValidator = require("email-validator");
+// Importation du package password validator afin de créer un schéma et attribuer des valeurs aux mots de passe pouvant être utilisés.
+const passwordValidator = require("password-validator");
+// Définition du passwordSchema et création de l'instance passwordValidator. //
+const passwordSchema = new passwordValidator();
+
+// Mise en place des règles pour la mise en place d'un mot de passe et exclusion des mots de passe faibles. //
+passwordSchema
+  // Mdp de minimum 8 caractères. //
+  .is()
+  .min(8)
+  // Mdp de maximum 16 caractères. //
+  .is()
+  .max(16)
+  // Mdp doit contenir au moins 1 majuscule. //
+  .has()
+  .uppercase(1)
+  // Mdp doit contenir au moins 1 minuscule. //
+  .has()
+  .lowercase()
+  // Mdp doit contenir au moins 1 chiffre. //
+  .has()
+  .digits(1)
+  // Mdp ne doit pas contenir d'espace. //
+  .has()
+  .not()
+  .spaces()
+  // Mdp ne doit pas faire partie de cette liste. //
+  .is()
+  .not()
+  .oneOf([
+    "Passw0rd",
+    "Password1",
+    "Password123",
+    "Azerty1",
+    "Azerty123",
+    "Motdepasse",
+    "Motdepasse123",
+  ]);
+
+// Fonction destinée à l'inscription d'un nouvel utilisateur. //
+exports.signup = (req, res, next) => {
+  // Si son adresse mail n'est pas validée par emailValidator alors envoi du status 500 et du message correspondant. //
+  if (!emailValidator.validate(req.body.email)) {
+    return res
+      .status(500)
+      .json({ message: "Adresse email non valide. Vérifiez le format." });
+  } else if (!passwordSchema.validate(req.body.password)) {
+    // Si le mot de passe ne respecte pas le schéma établi alors envoi du status 500 et du message correspondant. //
+    return res.status(500).json({
+      message:
+        "Le mot de passe doit contenir au moins : une minuscule, une majuscule, un chiffre. Il doit contenir entre 8 et 16 caractères sans espace ni symbole.",
+    });
+  } else {
+    // Si le mail ET le mdp respectent les exigences alors on hash le mot de passe saisi lors de la requête en lui ajoutant 10 salage afin d'éviter les attaques par analyse fréquentielles. //
+    bcrypt
+      .hash(req.body.password, 10)
+      // On récupère le hash et on l'attribue au mot de passe saisi par l'utilisateur. //
+      .then((hash) => {
+        const user = new User({
+          // On crée une instance afin de créer un nouvel utilisateur et on passe à l'email le mail saisi dans le corps de la requête. //
+          email: req.body.email,
+          // Le hash sera défini comme le mot de passe de l'utilisateur dans la base de données. //
+          password: hash,
+        });
+        // Sauvegarde de l'utilisateur et envoi du status 201 avec le message correspondant. //
+        user
+          .save()
+          .then(() =>
+            res.status(201).json({ message: "Utilisateur créé avec succès !" })
+          )
+          // Si un utilisateur existe déjà avec cette adresse, envoi du code 400 et de l'erreur. //
+          .catch((error) => res.status(400).json({ error }));
+      })
+      // Envoi d'une erreur si le code ne s'éxécute pas correctement. //
+      .catch((error) => res.status(500).json({ error }));
+  }
+};
+
+// Fonction destinée à la connexion. //
+exports.login = (req, res, next) => {
+  // Recherche de l'existence d'un email identique à celui de la requête dans notre base de données. //
+  User.findOne({ email: req.body.email })
+    .then((user) => {
+      // Si aucun utilisateur n'existe (le mail n'est pas trouvé dans la BDD) envoi d'une erreur 401 et d'un message sans donner d'indication précise. //
+      if (!user) {
+        return res
+          .status(401)
+          .json({ message: "Paire email et/ou mot de passe incorrecte !" });
+      }
+      // Utilisation de la fonction .compare de bcrypt afin de déterminer si le mdp de base peut correspondre au hash. //
+      bcrypt
+        .compare(req.body.password, user.password)
+        .then((valid) => {
+          // Si le hash ne correspond pas alors envoi d'une erreur 401 et d'un message correspondant sans donner d'indication précise. //
+          if (!valid) {
+            return res
+              .status(401)
+              .json({ error: "Paire email et/ou mot de passe incorrecte !" });
+          }
+          // Si le hash correspond envoi du statut 200 et d'un objet JSON contenant l'id de l'user et un token. //
+          res.status(200).json({
+            // Vérification de l'authentification de la requête. //
+            userId: user._id,
+            // Utilisation de jwt pour obtenir un token encodé. La valeur du token est contenue dans la variable d'environnement par mesure de sécurité. On encode également l'id de l'user pour qu'il ne puisse modifier que ses sauces. //
+            token: jwt.sign({ userId: user._id }, RANDOM_TOKEN_SECRET, {
+              // Le token a une durée de validité de 24H. //
+              expiresIn: "24h",
+            }),
+          });
+        })
+        // Si erreur envoi du code 500 et de l'erreur correspondante. //
+        .catch((error) => res.status(500).json({ error }));
+    })
+    .catch((error) => res.status(500).json({ error }));
+};

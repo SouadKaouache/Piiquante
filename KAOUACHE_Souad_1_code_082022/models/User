@@ -1,0 +1,21 @@
+/************************************** MODELE UTILISATEUR **************************************/
+
+// Importation de mongoose. //
+const mongoose = require("mongoose");
+// Importation du package mongoose-unique-validator afin de vérifier l'unicité d'un email. //
+const uniqueValidator = require("mongoose-unique-validator");
+// Importation du module mongodb-errors afin d'assurer la remontée des erreurs issues de la base de données. //
+const mongoDBerrors = require("mongoose-mongodb-errors");
+// Création d'un schéma utilisateur grâce à mongoose. //
+const userSchema = new mongoose.Schema({
+  // Le schéma indique que l'email doit être unique. //
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+});
+
+// Appel de la méthode plugin sur le schéma utilisateur avec pour paramètre uniqueValidator. //
+userSchema.plugin(uniqueValidator);
+// Appel du plugin mongoose mongodb errors et application sur le schéma utilisateur. //
+userSchema.plugin(mongoDBerrors);
+// Export du schéma qui s'appelera User et correspond au schéma utilisateur. //
+module.exports = mongoose.model("User", userSchema);

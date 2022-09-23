@@ -1,0 +1,17 @@
+/************************************** ROUTES UTILISATEUR **************************************/
+
+// Importation du framework express nous permettant d'utiliser express.Router. //
+const express = require("express");
+// Importation du router grâce à la méthode incluse dans express. //
+const router = express.Router();
+// Importation d'express Rate Limiter. //
+const rateLimit = require("../middleware/limiter");
+// Importation et assignation du controller user à la constante userCtrl. //
+const userCtrl = require("../controllers/user");
+
+// Création de la route inscription. //
+router.post("/signup", rateLimit.limiter, userCtrl.signup);
+// Création de la route connexion. //
+router.post("/login", rateLimit.limiter, userCtrl.login);
+
+module.exports = router;

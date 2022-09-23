@@ -1,0 +1,237 @@
+/************************************** LOGIQUE METIER **************************************/
+
+// Importation du modèle "sauce". //
+const Sauce = require("../models/Sauce");
+// Importation du module de Node "file system" de Node qui va nous permettre de gérer le téléchargement, la modification et la suppression d'images. //
+const fs = require("fs");
+// Mise en place de regex pour limiter le risque d'attaque par injection de code. //
+const regexInputs = /^[a-zA-Z0-9 _.,!()&éêèàçùîï]+$/;
+// Fonction qui permet de créer une nouvelle sauce. On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.createSauce = (req, res, next) => {
+  // Constante qui recevra les données envoyées par le front sous forme JSON en les transformant en objet JS. //
+  const sauceObject = JSON.parse(req.body.sauce);
+  // Suppression de l'id crée par le front. Un id pour chaque sauce sera attribué par MongoDb dans la base de données. //
+  delete sauceObject._id;
+  if (
+    !regexInputs.test(sauceObject.name) ||
+    !regexInputs.test(sauceObject.manufacturer) ||
+    !regexInputs.test(sauceObject.description) ||
+    !regexInputs.test(sauceObject.mainPepper)
+  ) {
+    return res.status(401).json({
+      message:
+        "Certains champs sont renseignés avec des caractères invalides. Seuls les espaces, les chiffres, lettres avec ou sans accent et symboles , ' . et - sont acceptés. Les espaces consécutifs ne sont pas acceptés.",
+    });
+  }
+  // Création d'une instance à partir du constructeur présent dans le dossier models. //
+  const sauce = new Sauce({
+    // Spread qui permet de récupérer tout les éléments a l'intérieur de l'objet. //
+    ...sauceObject,
+    // Mise à 0 des likes, dislikes et création d'un tableau vide pour les utilisateurs ayant liké ou disliké une sauce. //
+    likes: 0,
+    dislikes: 0,
+    userDisliked: [],
+    userLiked: [],
+    // Génération de l'URL de l'image. Req protocol nous permet de récupérer la partie HTTP, req.get("host") nous permet de récupérer l'hôte du serveur (localhost:3000). On ajoute /images/ et le nom du fichier pour compléter l'URL. //
+    imageUrl: `${req.protocol}://${req.get("host")}/images/${
+      req.file.filename
+    }`,
+  });
+  // Sauvegarde de notre sauce et envoi du status 201 avec le message "sauce enregistrée" en cas de réussite. Envoi du code erreur 400 et de l'erreur en cas d'échec. //
+  sauce
+    .save()
+    .then(() => res.status(201).json({ message: "Sauce enregistrée !" }))
+    // Si la création de la sauce ne se fait pas, envoi du code 400 et de l'erreur rencontrée. //
+    .catch((error) => {
+      console.log(json({ error }));
+      res.status(400).json({ error });
+    });
+};
+
+// Fonction qui permet de récupérer une seule sauce. On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.getOneSauce = (req, res, next) => {
+  // Utilisation de la méthode findOne en lui passant l'objet de comparaison. Ici on veut que l'id de la sauce soit le même que le paramètre de requête. //
+  Sauce.findOne({
+    _id: req.params.id,
+  })
+    // Si la sauce (l'id) est trouvée, alors on envoi la réponse (la sauce) avec le status 200. //
+    .then((sauce) => {
+      res.status(200).json(sauce);
+    })
+    // S'il y a une erreur on génère le code 404 pour indiquer que la sauce n'est pas trouvée. //
+    .catch((error) => {
+      res.status(404).json({
+        error: error,
+      });
+    });
+};
+
+// Fonction qui permet de modifier une sauce. On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.modifySauce = (req, res, next) => {
+  // Fonction ternaire qui va permettre de vérifier si la requête soumise (la modification de la sauce) contient bien une image. //
+  const sauceObject = req.file
+    ? {
+        ...JSON.parse(req.body.sauce),
+        imageUrl: `${req.protocol}://${req.get("host")}/images/${
+          req.file.filename
+        }`,
+      }
+    : // Si le corps de la requête ne contient pas d'image. //
+      { ...req.body };
+  // Test des champs saisis lors de la modification de la sauce afin de savoir si les regex sont respectés. //
+  if (
+    !regexInputs.test(sauceObject.name) ||
+    !regexInputs.test(sauceObject.manufacturer) ||
+    !regexInputs.test(sauceObject.description) ||
+    !regexInputs.test(sauceObject.mainPepper)
+  ) {
+    return res.status(401).json({
+      message: "Certains champs sont renseignés avec des caractères invalides",
+    });
+  }
+  // Utilisation de la méthode findOne en lui passant l'objet de comparaison. Ici on veut que l'id de la sauce soit le même que le paramètre de requête. //
+  Sauce.findOne({ _id: req.params.id })
+    .then((sauce) => {
+      if (sauce.userId != req.auth.userId) {
+        res.status(403).json({ message: "Unauthorized request." });
+      } else {
+        // Suppression de l'ancienne image du serveur grâce à la méthode fs.unlink. //
+        const filename = sauce.imageUrl.split("/images/")[1];
+        fs.unlink(`images/${filename}`, () => {
+          // Mise à jour de la sauce avec les paramètres de la requête. //
+          Sauce.updateOne(
+            { _id: req.params.id },
+            { ...sauceObject, _id: req.params.id }
+          )
+            // Si la sauce se modifie correctement, envoi du code 200 et message "Sauce modifiée" si la sauce ne se modifie pas envoi code erreur 400. //
+            .then(() => res.status(200).json({ message: "Sauce modifiée !" }))
+            .catch((error) => res.status(400).json({ error }));
+        });
+      }
+    })
+    // Si problème d'éxécution de la fonction envoi du code 500. //
+    .catch((error) => res.status(500).json({ error }));
+};
+
+// Fonction qui permet de supprimer une sauce. On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.deleteSauce = (req, res, next) => {
+  // Utilisation de la méthode findOne en lui passant l'objet de comparaison. Ici on veut que l'id de la sauce soit le même que le paramètre de requête. //
+  Sauce.findOne({ _id: req.params.id })
+    .then((sauce) => {
+      if (!sauce) {
+        return res.status(404).json({ message: "La sauce n'existe pas !" });
+      }
+      // Si l'id du créateur de la sauce est différent de celui qui fait la requête de suppression envoi du code 401 et message "Action non autorisée." //
+      if (sauce.userId != req.auth.userId) {
+        res.status(401).json({ message: "Action non autorisée." });
+      } else {
+        // Si l'id de requête correspond alors on supprime l'image du dossier grâce à la méthode fs.unlink. //
+        const filename = sauce.imageUrl.split("/images/")[1];
+        fs.unlink(`images/${filename}`, () => {
+          // On appelle ensuite la fonction pour en supprimer une. //
+          Sauce.deleteOne({ _id: req.params.id })
+            .then(() => {
+              // Si la sauce est supprimée, envoi du code 200 et du message "Objet supprimé !". //
+              res.status(200).json({ message: "Objet supprimé !" });
+            })
+            // Si l'objet ne se supprime pas alors envoi du code 401 et de l'erreur. //
+            .catch((error) => res.status(401).json({ error }));
+        });
+      }
+    })
+    // Si problème d'éxécution de la fonction envoi du code 500. //
+    .catch((error) => {
+      res.status(500).json({ error });
+    });
+};
+
+// Fonction qui permet de récupérer toutes les sauces . On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.getAllSauces = (req, res, next) => {
+  // Recherche de l'existence d'une sauce grâce à la méthode .find. //
+  Sauce.find()
+    // Si des sauces existent on envoi un tableau de toutes les sauces existantes et un code 200. //
+    .then((sauces) => {
+      res.status(200).json(sauces);
+    })
+    .catch((error) => {
+      // Si la recherche rencontre une erreur envoi du code 400 et de l'erreur rencontrée. //
+      res.status(400).json({
+        error: error,
+      });
+    });
+};
+
+// Fonction qui permet de liker ou disliker une sauce . On l'exporte afin de pouvoir l'utiliser dans d'autres fichiers. //
+exports.rateSauce = (req, res, next) => {
+  // Utilisation de la méthode findOne en lui passant l'objet de comparaison. Ici on veut que l'id de la sauce soit le même que le paramètre de requête. //
+  Sauce.findOne({ _id: req.params.id })
+    .then((sauce) => {
+      // Si l'user n'est pas inclus dans les users ayant déjà liké une sauce ET qu'il met un like. //
+      if (!sauce.usersLiked.includes(req.body.userId) && req.body.like === 1) {
+        // On met la sauce à jour. //
+        Sauce.updateOne(
+          { _id: req.params.id },
+          // On incrémente les likes de 1 et on push l'user qui a liké dans l'array usersLiked. //
+          { $inc: { likes: +1 }, $push: { usersLiked: req.body.userId } }
+        )
+          .then(() =>
+            // Si la sauce est liké envoi du code 200 et du message correspondant. //
+            res.status(200).json({ message: "Super! Cette sauce a été likée." })
+          )
+          // S'il y a une erreur envoi du code 400 et de l'erreur. //
+          .catch((error) => res.status(400).json({ error }));
+      } else if (
+        // Si l'user a déjà liké la sauce et qu'il la re-like (donc repasse à 0). //
+        sauce.usersLiked.includes(req.body.userId) &&
+        req.body.like === 0
+      ) {
+        // Mise à jour de la sauce en décrémentant les likes et en retirant l'user de l'array usersLiked. //
+        Sauce.updateOne(
+          { _id: req.params.id },
+          { $inc: { likes: -1 }, $pull: { usersLiked: req.body.userId } }
+        )
+          // Si le like est retiré envoi du code 200 et du message correspondant. //
+          .then(() => res.status(200).json({ message: "Aucun choix saisi." }))
+          // S'il y a une erreur envoi du code 400 et de l'erreur. //
+          .catch((error) => res.status(400).json({ error }));
+      } else if (
+        // Si l'user n'a pas encore dislike ET qu'il dislike. //
+        !sauce.usersDisliked.includes(req.body.userId) &&
+        req.body.like === -1
+      ) {
+        // Mise à jour de la sauce en incrémentant les dislikes et en ajoutant l'user à l'array usersDisliked. //
+        Sauce.updateOne(
+          { _id: req.params.id },
+          { $inc: { dislikes: +1 }, $push: { usersDisliked: req.body.userId } }
+        )
+          // Si le dislike est ajouté envoi du code 200 et du message correspondant. //
+          .then(() =>
+            res
+              .status(200)
+              .json({ message: "Oups! Cette sauce a été dislikée." })
+          )
+          // S'il y a une erreur envoi du code 400 et de l'erreur. //
+          .catch((error) => res.status(400).json({ error }));
+      } else if (
+        // Si l'user a déjà disliké la sauce et qu'il la re-dislike (donc repasse à 0). //
+        sauce.usersDisliked.includes(req.body.userId) &&
+        req.body.like === 0
+      ) {
+        // Mise à jour de la sauce en décrémentant les dislikes et en retirant l'user de l'array usersDisliked. //
+        Sauce.updateOne(
+          { _id: req.params.id },
+          { $inc: { dislikes: -1 }, $pull: { usersDisliked: req.body.userId } }
+        )
+          // Si le dislike est retiré envoi du code 200 et du message correspondant. //
+          .then(() => res.status(200).json({ message: "Aucun choix saisi." }))
+          // S'il y a une erreur envoi du code 400 et de l'erreur. //
+          .catch((error) => res.status(400).json({ error }));
+      } else {
+        // Si une erreur est rencontré envoi du code 400 et du message correspondant. //
+        return res
+          .status(400)
+          .json({ message: "L'opération n'a pas pu être effectuée." });
+      }
+    })
+    .catch((error) => res.status(404).json({ error }));
+};

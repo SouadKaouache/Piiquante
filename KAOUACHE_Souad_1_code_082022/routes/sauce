@@ -1,0 +1,27 @@
+/************************************** ROUTES SAUCE **************************************/
+
+// Importation du framework express nous permettant d'utiliser express.Router. //
+const express = require("express");
+// Importation du router grâce à la méthode incluse dans express. //
+const router = express.Router();
+// Importation du middleware d'authentification qui va sécuriser nos routes. //
+const auth = require("../middleware/auth");
+// Importation du middleware multer qui nous servira à la gestion des images. //
+const multer = require("../middleware/multer-config");
+// Importation du controller lié aux sauces. //
+const sauceCtrl = require("../controllers/sauce");
+
+// CREATION DE LA SAUCE => Vérifie l'authentification, enregistre l'image et procède à la création et son enregistrement dans la base de données. //
+router.post("/", auth, multer, sauceCtrl.createSauce);
+// RECUPERATION DE TOUTES LES SAUCES => Renvoi le tableau contenant l'ensemble des sauces présentes dans la base de données. //
+router.get("/", auth, sauceCtrl.getAllSauces);
+//  RECUPERATION D'UNE SAUCE => Renvoi la sauce avec l'id. //
+router.get("/:id", auth, sauceCtrl.getOneSauce);
+// MODIFICATION D'UNE SAUCE. => Met à jour la sauce et supprime l'image si une nouvelle est téléchargée. //
+router.put("/:id", auth, multer, sauceCtrl.modifySauce);
+// SUPPRESSION D'UNE SAUCE => Supprime la sauce avec l'id. //
+router.delete("/:id", auth, sauceCtrl.deleteSauce);
+// LIKE ET DISLIKE D'UNE SAUCE => Défini le like ou dislike mis par l'utilisateur. //
+router.post("/:id/like", auth, sauceCtrl.rateSauce);
+
+module.exports = router;
